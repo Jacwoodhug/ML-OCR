@@ -1,0 +1,80 @@
+project:
+  name: ML-OCR
+  seed: 42
+
+# Character set
+alphabet:
+  # Blank token is always index 0 (for CTC)
+  chars: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?-:;'\"()@#$%&+=/_~[] {}\\|<>^`"
+
+# Data generation
+data:
+  img_height: 32
+  img_min_width: 32
+  img_max_width: 800
+  min_text_len: 1
+  max_text_len: 50
+  word_mode_prob: 0.7          # probability of generating word-like text vs pure random chars
+  backgrounds_dir: "data/backgrounds"
+  fonts_cache: "data/fonts/fonts.json"
+
+  # Background type probabilities (must sum to 1.0)
+  bg_solid_prob: 0.3
+  bg_gradient_prob: 0.3
+  bg_texture_prob: 0.4
+
+  # Augmentation
+  augmentation:
+    enabled: true
+    blur_limit: 5
+    noise_var_limit: 25.0
+    jpeg_quality_lower: 50
+    rotation_limit: 5
+    perspective_scale: 0.05
+    brightness_limit: 0.3
+    contrast_limit: 0.3
+
+# Model architecture
+model:
+  backbone: "mobilenet_v3_small"       # torchvision model name
+  backbone_out_channels: 576           # MobileNetV3-Small last conv channels
+  backbone_pretrained: true
+  lstm_hidden_size: 256
+  lstm_num_layers: 2
+  lstm_dropout: 0.1
+
+# Training
+training:
+  batch_size: 256
+  num_workers: 4
+  max_iterations: 500000
+  val_interval: 2000                   # validate every N iterations
+  checkpoint_interval: 10000           # save checkpoint every N iterations
+  log_interval: 100                    # log to tensorboard every N iterations
+
+  optimizer:
+    type: "adamw"
+    lr: 1.0e-3
+    weight_decay: 1.0e-4
+
+  scheduler:
+    type: "one_cycle"
+    max_lr: 1.0e-3
+    pct_start: 0.05                    # 5% warmup
+
+  amp: true                            # mixed precision training
+  grad_clip_norm: 5.0
+
+  # Validation set
+  val_size: 10000                      # number of pre-generated validation samples
+
+  # Checkpoints
+  checkpoint_dir: "checkpoints"
+  best_model_path: "checkpoints/best.pt"
+  tensorboard_dir: "runs"
+
+# Inference / export
+inference:
+  onnx_path: "exports/model.onnx"
+  quantized_onnx_path: "exports/model_int8.onnx"
+  beam_width: 0                        # 0 = greedy decoding, >0 = beam search
