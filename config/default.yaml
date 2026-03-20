@@ -46,7 +46,8 @@ model:
 # Training
 training:
   batch_size: 256
-  num_workers: 4
+  num_workers: 8
+  prefetch_factor: 4
   max_iterations: 500000
   val_interval: 2000                   # validate every N iterations
   checkpoint_interval: 10000           # save checkpoint every N iterations

@@ -58,6 +58,7 @@ def main():
     parser.add_argument("--resume", default=None, help="Checkpoint path to resume from")
     parser.add_argument("--steps", type=int, default=None, help="Override max training iterations")
     parser.add_argument("--data-dir", default=None, help="Pre-generated training data directory (skips on-the-fly generation)")
+    parser.add_argument("--no-augment", action="store_true", help="Disable runtime augmentation (use when data was pre-augmented)")
     args = parser.parse_args()
 
     # Load config
@@ -98,7 +99,10 @@ def main():
     # Create datasets
     aug_config = data_cfg.get("augmentation", {})
     aug_kwargs = {k: v for k, v in aug_config.items() if k != "enabled"}
-    augment = aug_config.get("enabled", True)
+    augment = aug_config.get("enabled", True) and not args.no_augment
+
+    if args.no_augment:
+        print("Runtime augmentation: disabled")
 
     if args.data_dir:
         print(f"Using pre-generated training data from {args.data_dir}")
@@ -116,6 +120,8 @@ def main():
     batch_size = train_cfg.get("batch_size", 256)
     num_workers = train_cfg.get("num_workers", 4)
 
+    prefetch_factor = train_cfg.get("prefetch_factor", 4) if num_workers > 0 else None
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -124,6 +130,7 @@ def main():
         collate_fn=collate_fn,
         pin_memory=True,
         persistent_workers=num_workers > 0,
+        prefetch_factor=prefetch_factor,
     )
     val_loader = DataLoader(
         val_dataset,

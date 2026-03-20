@@ -46,23 +46,37 @@ Output: `data/backgrounds/` (~5640 texture images)
 
 ### 5. Pre-generate training data (recommended)
 
-Pre-generating avoids the CPU bottleneck of on-the-fly rendering during training:
+Pre-generating avoids the CPU bottleneck of on-the-fly rendering during training.
+
+Generate clean images (augmentation applied at training time):
 
 ```powershell
 python scripts/pregenerate.py --count 500000 --output data/train
 ```
 
-This is resumable — if interrupted, re-run the same command and it picks up where it left off.
+Or bake augmentations in at generation time for maximum training speed (workers just decode PNGs):
+
+```powershell
+python scripts/pregenerate.py --count 500000 --output data/train --augment
+```
+
+> Generation is resumable — if interrupted, re-run the same command and it picks up where it left off.
 
 ### 6. Start training
 
-With pre-generated data (faster):
+With pre-generated clean data (augmentation runs at load time):
 
 ```powershell
 python scripts/train.py --data-dir data/train
 ```
 
-Or on-the-fly generation (no disk space needed but slower):
+With pre-augmented data (fastest — no per-sample CPU work during training):
+
+```powershell
+python scripts/train.py --data-dir data/train --no-augment
+```
+
+Or on-the-fly generation (no disk space needed but slowest):
 
 ```powershell
 python scripts/train.py
@@ -73,6 +87,7 @@ Options:
 - `--resume CHECKPOINT` — Resume from a saved checkpoint
 - `--steps N` — Override max training iterations (default: 500K)
 - `--data-dir DIR` — Pre-generated training data directory
+- `--no-augment` — Disable runtime augmentation (use when data was pre-generated with `--augment`)
 
 The default config trains for 500K iterations with batch size 256, mixed precision (FP16) on GPU. Training data is generated on-the-fly — no dataset to download.
 
