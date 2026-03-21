@@ -71,6 +71,8 @@ class Trainer:
         # Checkpointing
         self.checkpoint_dir = train_cfg.get("checkpoint_dir", "checkpoints")
         self.best_model_path = train_cfg.get("best_model_path", "checkpoints/best.pt")
+        tag = train_cfg.get("checkpoint_tag", "")
+        self.checkpoint_tag = f"_{tag}" if tag else ""
         os.makedirs(self.checkpoint_dir, exist_ok=True)
 
         # TensorBoard
@@ -92,63 +94,72 @@ class Trainer:
         running_loss = 0.0
         log_steps = 0
 
-        while self.global_step < self.max_iterations:
-            # Get next batch (re-create iterator if exhausted)
-            try:
-                batch = next(train_iter)
-            except StopIteration:
-                train_iter = iter(self.train_loader)
-                batch = next(train_iter)
+        try:
+            while self.global_step < self.max_iterations:
+                # Get next batch (re-create iterator if exhausted)
+                try:
+                    batch = next(train_iter)
+                except StopIteration:
+                    train_iter = iter(self.train_loader)
+                    batch = next(train_iter)
 
-            loss = self._train_step(batch)
-            running_loss += loss
-            log_steps += 1
+                loss = self._train_step(batch)
+                running_loss += loss
+                log_steps += 1
 
-            self.global_step += 1
-            pbar.update(1)
+                self.global_step += 1
+                pbar.update(1)
 
-            # Logging
-            if self.global_step % self.log_interval == 0:
-                avg_loss = running_loss / log_steps
-                lr = self.optimizer.param_groups[0]["lr"]
-                self.writer.add_scalar("train/loss", avg_loss, self.global_step)
-                self.writer.add_scalar("train/lr", lr, self.global_step)
-                pbar.set_postfix(loss=f"{avg_loss:.4f}", lr=f"{lr:.2e}")
-                running_loss = 0.0
-                log_steps = 0
+                # Logging
+                if self.global_step % self.log_interval == 0:
+                    avg_loss = running_loss / log_steps
+                    lr = self.optimizer.param_groups[0]["lr"]
+                    self.writer.add_scalar("train/loss", avg_loss, self.global_step)
+                    self.writer.add_scalar("train/lr", lr, self.global_step)
+                    pbar.set_postfix(loss=f"{avg_loss:.4f}", lr=f"{lr:.2e}")
+                    running_loss = 0.0
+                    log_steps = 0
 
-            # Validation
-            if self.val_loader and self.global_step % self.val_interval == 0:
-                val_metrics = self.validate()
-                self.writer.add_scalar("val/cer", val_metrics["cer"], self.global_step)
-                self.writer.add_scalar("val/wer", val_metrics["wer"], self.global_step)
-                self.writer.add_scalar("val/seq_acc", val_metrics["seq_acc"], self.global_step)
-                self.writer.add_scalar("val/loss", val_metrics["loss"], self.global_step)
+                # Validation
+                if self.val_loader and self.global_step % self.val_interval == 0:
+                    val_metrics = self.validate()
+                    self.writer.add_scalar("val/cer", val_metrics["cer"], self.global_step)
+                    self.writer.add_scalar("val/wer", val_metrics["wer"], self.global_step)
+                    self.writer.add_scalar("val/seq_acc", val_metrics["seq_acc"], self.global_step)
+                    self.writer.add_scalar("val/loss", val_metrics["loss"], self.global_step)
 
-                tqdm.write(
-                    f"Step {self.global_step}: "
-                    f"val_loss={val_metrics['loss']:.4f} "
-                    f"CER={val_metrics['cer']:.4f} "
-                    f"WER={val_metrics['wer']:.4f} "
-                    f"Acc={val_metrics['seq_acc']:.4f}"
-                )
+                    tqdm.write(
+                        f"Step {self.global_step}: "
+                        f"val_loss={val_metrics['loss']:.4f} "
+                        f"CER={val_metrics['cer']:.4f} "
+                        f"WER={val_metrics['wer']:.4f} "
+                        f"Acc={val_metrics['seq_acc']:.4f}"
+                    )
 
-                # Save best model
-                if val_metrics["cer"] < self.best_cer:
-                    self.best_cer = val_metrics["cer"]
-                    self._save_checkpoint(self.best_model_path, is_best=True)
-                    tqdm.write(f"  -> New best CER: {self.best_cer:.4f}")
+                    # Save best model
+                    if val_metrics["cer"] < self.best_cer:
+                        self.best_cer = val_metrics["cer"]
+                        self._save_checkpoint(self.best_model_path, is_best=True)
+                        tqdm.write(f"  -> New best CER: {self.best_cer:.4f}")
 
-                self.model.train()
+                    self.model.train()
 
-            # Periodic checkpoint
-            if self.global_step % self.checkpoint_interval == 0:
-                path = os.path.join(self.checkpoint_dir, f"step_{self.global_step}.pt")
-                self._save_checkpoint(path)
+                # Periodic checkpoint
+                if self.global_step % self.checkpoint_interval == 0:
+                    path = os.path.join(self.checkpoint_dir, f"step_{self.global_step}{self.checkpoint_tag}.pt")
+                    self._save_checkpoint(path)
 
-        pbar.close()
-        self.writer.close()
-        print(f"Training complete. Best CER: {self.best_cer:.4f}")
+        except KeyboardInterrupt:
+            print("\nInterrupted — saving checkpoint...")
+            path = os.path.join(self.checkpoint_dir, f"step_{self.global_step}{self.checkpoint_tag}.pt")
+            self._save_checkpoint(path)
+            print(f"Saved to {path}. Resume with --resume {path}")
+        finally:
+            pbar.close()
+            self.writer.close()
+
+        if self.global_step >= self.max_iterations:
+            print(f"Training complete. Best CER: {self.best_cer:.4f}")
 
     def _train_step(self, batch: dict) -> float:
         """Execute a single training step."""

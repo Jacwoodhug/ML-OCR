@@ -59,6 +59,7 @@ def main():
     parser.add_argument("--steps", type=int, default=None, help="Override max training iterations")
     parser.add_argument("--data-dir", default=None, help="Pre-generated training data directory (skips on-the-fly generation)")
     parser.add_argument("--no-augment", action="store_true", help="Disable runtime augmentation (use when data was pre-augmented)")
+    parser.add_argument("--tag", default=None, help="Tag appended to checkpoint filenames, e.g. 'grayscale' -> best_grayscale.pt")
     args = parser.parse_args()
 
     # Load config
@@ -67,6 +68,11 @@ def main():
 
     if args.steps is not None:
         config.setdefault("training", {})["max_iterations"] = args.steps
+
+    if args.tag:
+        tag = args.tag
+        config.setdefault("training", {})["best_model_path"] = f"checkpoints/best_{tag}.pt"
+        config.setdefault("training", {})["checkpoint_tag"] = tag
 
     data_cfg = config.get("data", {})
     model_cfg = config.get("model", {})

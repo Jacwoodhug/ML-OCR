@@ -54,6 +54,7 @@ class SynthGenerator:
         bg_solid_prob: float = 0.3,
         bg_gradient_prob: float = 0.3,
         bg_texture_prob: float = 0.4,
+        simple: bool = False,
     ):
         # Load font list
         with open(fonts_json, "r", encoding="utf-8") as f:
@@ -79,7 +80,11 @@ class SynthGenerator:
         self.max_text_len = max_text_len
         self.word_mode_prob = word_mode_prob
 
-        # Normalize background probabilities
+        self.simple = simple
+
+        # Normalize background probabilities (simple mode disables textures)
+        if simple:
+            bg_texture_prob = 0.0
         total = bg_solid_prob + bg_gradient_prob + bg_texture_prob
         self.bg_solid_prob = bg_solid_prob / total
         self.bg_gradient_prob = bg_gradient_prob / total
@@ -123,6 +128,18 @@ class SynthGenerator:
     # ------------------------------------------------------------------
     def _random_color(self) -> tuple[int, int, int]:
         return (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+
+    def _luminance(self, color: tuple[int, int, int]) -> float:
+        return (0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]) / 255.0
+
+    def _pick_contrasting_color(self, bg_color: tuple[int, int, int]) -> tuple[int, int, int]:
+        """Pick a random color with luminance at least 40% from bg_color's luminance."""
+        bg_lum = self._luminance(bg_color)
+        for _ in range(50):
+            color = self._random_color()
+            if abs(self._luminance(color) - bg_lum) >= 0.40:
+                return color
+        return (0, 0, 0) if bg_lum > 0.5 else (255, 255, 255)
 
     def _solid_background(self, width: int, height: int) -> Image.Image:
         return Image.new("RGB", (width, height), self._random_color())
@@ -223,12 +240,22 @@ class SynthGenerator:
         canvas_w = text_w + 2 * pad_x
         canvas_h = text_h + 2 * pad_y
 
-        # Generate background at canvas size
+        # Generate background and pick text color
         bg = self._make_background(canvas_w, canvas_h)
+        if self.simple:
+            # Sample mean color of the text region to enforce contrast against whatever bg was generated
+            x0 = max(0, pad_x)
+            y0 = max(0, pad_y)
+            x1 = min(canvas_w, pad_x + text_w)
+            y1 = min(canvas_h, pad_y + text_h)
+            region = np.array(bg.crop((x0, y0, x1, y1)))
+            mean_color = tuple(int(v) for v in region.mean(axis=(0, 1)))
+            text_color = self._pick_contrasting_color(mean_color)
+        else:
+            text_color = self._random_color()
 
         # Draw text
         draw = ImageDraw.Draw(bg)
-        text_color = self._random_color()
         draw.text((pad_x - bbox[0], pad_y - bbox[1]), text, fill=text_color, font=font)
 
         # Resize to target height, preserving aspect ratio
@@ -237,5 +264,8 @@ class SynthGenerator:
         target_w = max(self.img_min_width, min(self.img_max_width, target_w))
 
         img = bg.resize((target_w, self.img_height), Image.BILINEAR)
+
+        if self.simple:
+            img = img.convert("L").convert("RGB")
 
         return img, text

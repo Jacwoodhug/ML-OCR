@@ -12,6 +12,7 @@ import os
 import sys
 
 import gradio as gr
+import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,6 +37,15 @@ def build_app(model_path: str | None) -> gr.Blocks:
             return f"Model loaded: {os.path.basename(path)}"
         except Exception as exc:
             return f"Failed to load model: {exc}"
+
+    def convert_to_bw(image: Image.Image | None) -> Image.Image | None:
+        if image is None:
+            return None
+        img_np = np.array(image.convert("RGB"), dtype=np.float32)
+        stds = [img_np[:, :, c].std() for c in range(3)]
+        best = int(np.argmax(stds))
+        channel = img_np[:, :, best].astype(np.uint8)
+        return Image.fromarray(channel, mode="L").convert("RGB")
 
     def run_ocr(image: Image.Image | None) -> str:
         if predictor[0] is None:
@@ -74,7 +84,9 @@ def build_app(model_path: str | None) -> gr.Blocks:
             sources=["upload", "clipboard"],
         )
 
-        run_btn = gr.Button("▶  Run OCR", variant="primary")
+        with gr.Row():
+            bw_btn = gr.Button("Convert to BW")
+            run_btn = gr.Button("▶  Run OCR", variant="primary")
 
         result = gr.Textbox(
             label="Predicted text",
@@ -82,6 +94,7 @@ def build_app(model_path: str | None) -> gr.Blocks:
         )
 
         load_btn.click(fn=load_model, inputs=model_input, outputs=model_status)
+        bw_btn.click(fn=convert_to_bw, inputs=image_input, outputs=image_input)
         run_btn.click(fn=run_ocr, inputs=image_input, outputs=result)
 
     return app

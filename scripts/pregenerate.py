@@ -67,6 +67,7 @@ def main():
     parser.add_argument("--format", default="jpg", choices=["jpg", "png"], help="Image format (default: jpg)")
     parser.add_argument("--jpeg-quality", type=int, default=90, help="JPEG quality when --format=jpg (default: 90)")
     parser.add_argument("--google-fonts", action="store_true", help="Use Google Fonts instead of system fonts (data/fonts/google_fonts.json)")
+    parser.add_argument("--simple", action="store_true", help="Grayscale output, solid/gradient backgrounds only, text/bg luminance contrast enforced")
     parser.add_argument("--workers", type=int, default=None, help="Number of worker processes (default: min(CPU count, 8))")
     args = parser.parse_args()
 
@@ -89,6 +90,7 @@ def main():
         bg_solid_prob=data_cfg.get("bg_solid_prob", 0.3),
         bg_gradient_prob=data_cfg.get("bg_gradient_prob", 0.3),
         bg_texture_prob=data_cfg.get("bg_texture_prob", 0.4),
+        simple=args.simple,
     )
 
     aug_kwargs = None
@@ -138,18 +140,28 @@ def main():
         for i in range(start_idx, args.count)
     )
 
+    completed = 0
     with open(labels_path, "a", encoding="utf-8") as f:
-        with ProcessPoolExecutor(
+        executor = ProcessPoolExecutor(
             max_workers=n_workers,
             initializer=_worker_init,
             initargs=(generator_kwargs, aug_kwargs),
-        ) as executor:
+        )
+        try:
             with tqdm(total=args.count, initial=start_idx, unit="img", dynamic_ncols=True) as pbar:
-                for n, text in enumerate(executor.map(_generate_and_save, tasks, chunksize=64)):
+                for completed, text in enumerate(executor.map(_generate_and_save, tasks, chunksize=64), 1):
                     f.write(text + "\n")
                     pbar.update(1)
-                    if (start_idx + n + 1) % 10_000 == 0:
+                    if (start_idx + completed) % 10_000 == 0:
                         f.flush()
+        except KeyboardInterrupt:
+            print("\nInterrupted — stopping workers...")
+            executor.shutdown(wait=False, cancel_futures=True)
+            f.flush()
+            print(f"Saved {start_idx + completed:,} samples. Resume with the same command.")
+            return
+        else:
+            executor.shutdown(wait=True)
 
     print(f"Done. Saved {args.count:,} samples to {args.output}/")
 
