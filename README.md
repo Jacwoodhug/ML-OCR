@@ -99,9 +99,16 @@ For grayscale, high-contrast output (ideal for documents/receipts):
 python scripts/pregenerate.py --count 500000 --output data/train --bw
 ```
 
+Or generate directly to LMDB (skips intermediate files, faster for large datasets):
+
+```powershell
+python scripts/pregenerate.py --lmdb data/train.lmdb --count 500000 --bw --bg-ratio 60
+```
+
 Options:
 - `--count N` — Number of samples to generate
-- `--output DIR` — Output directory
+- `--output DIR` — Output directory (for file-based output)
+- `--lmdb PATH` — Write directly to LMDB format (skips intermediate files)
 - `--config CONFIG` — Config file (default: `config/default.yaml`)
 - `--augment` — Bake augmentations into saved images
 - `--format {jpg,png}` — Image format (default: `jpg`)
@@ -112,12 +119,13 @@ Options:
 - `--font-file PATH` — Path to a specific font file (.ttf/.otf). Can be repeated
 - `--font-dir DIR` — Path to a directory of font files to use instead of the fonts cache
 - `--workers N` — Number of worker processes (default: min(CPU count, 8))
+- `--map-size-gb N` — LMDB map size in GB (default: 20, only used with `--lmdb`)
 
-> Generation is resumable — if interrupted, re-run the same command and it picks up where it left off.
+> Generation is resumable — if interrupted, re-run the same command and it picks up where it left off (both file-based and LMDB modes).
 
-### 6. Convert to LMDB (optional, for large datasets)
+### 6. Convert to LMDB (optional, for file-based datasets)
 
-For large datasets, converting to LMDB gives faster random-access reads during training:
+If you already generated data as individual files, convert to LMDB for faster training I/O:
 
 ```powershell
 python scripts/convert_to_lmdb.py --input data/train --output data/train.lmdb
@@ -152,12 +160,13 @@ python scripts/train.py
 Options:
 - `--config CONFIG` — Config file path (default: `config/default.yaml`)
 - `--resume CHECKPOINT` — Resume from a saved checkpoint
-- `--steps N` — Override max training iterations (default: 500K)
+- `--steps N` — Override max training iterations (default: 500K). When used with `--reset-lr`, this is the number of **new** steps to train
 - `--data-dir DIR` — Pre-generated training data directory
 - `--lmdb PATH` — LMDB training dataset path (faster than `--data-dir` for large datasets)
 - `--no-augment` — Disable runtime augmentation (use when data was pre-generated with `--augment`)
 - `--bw` — Use grayscale, high-contrast generator for the validation set
 - `--tag NAME` — Tag appended to checkpoint filenames (e.g. `--tag grayscale` → `best_grayscale.pt`)
+- `--reset-lr` — Reset the learning rate schedule when resuming (for fine-tuning on new data). Loads model weights only, creates a fresh optimizer and LR schedule
 
 The default config trains for 500K iterations with batch size 256, mixed precision (FP16) on GPU.
 
@@ -203,11 +212,13 @@ Use `--bg-ratio` to include a percentage of real background textures if your tar
 
 ### 2. Fine-tune from a pretrained checkpoint
 
-Resume from your best general model and train on the font-specific data. Use `--tag` to keep the fine-tuned checkpoint separate:
+Resume from your best general model and train on the font-specific data. Use `--reset-lr` to get a fresh learning rate schedule and `--tag` to keep the fine-tuned checkpoint separate:
 
 ```powershell
-python scripts/train.py --data-dir data/finetune_consolas --resume checkpoints/best.pt --steps 50000 --tag consolas --bw
+python scripts/train.py --data-dir data/finetune_consolas --resume checkpoints/best.pt --steps 50000 --tag consolas --bw --reset-lr
 ```
+
+The `--reset-lr` flag loads only the model weights from the checkpoint and creates a fresh optimizer + LR schedule for the specified number of new steps. Without it, the scheduler state from the original training run is restored, which typically means a near-zero learning rate — too low for the model to adapt to new data.
 
 Tips:
 - **Dataset size:** 10K–50K samples is usually enough for fine-tuning on a handful of fonts.
@@ -215,6 +226,7 @@ Tips:
 - **`--bw` flag on training:** Generates the validation set in the same grayscale style so metrics reflect your target domain.
 - **Combining with `--augment`:** You can pre-bake augmentations (`--augment` on `pregenerate.py`) and then use `--no-augment` during training for maximum throughput.
 - **Mixing data:** For best results, consider mixing font-specific data with some general data to avoid catastrophic forgetting. Generate both datasets and combine them into one directory.
+- **Background fine-tuning:** To improve robustness on noisy backgrounds, generate data with `--bg-ratio 60` and fine-tune with `--reset-lr`.
 
 The fine-tuned checkpoint will be saved as `checkpoints/best_consolas.pt` (matching the `--tag`).
 

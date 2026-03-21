@@ -157,10 +157,7 @@ class Trainer:
             pbar.close()
             self.writer.close()
             # Shut down persistent DataLoader workers so the process can exit
-            if hasattr(self.train_loader, '_iterator') and self.train_loader._iterator is not None:
-                self.train_loader._iterator._shutdown_workers()
-            if self.val_loader and hasattr(self.val_loader, '_iterator') and self.val_loader._iterator is not None:
-                self.val_loader._iterator._shutdown_workers()
+            self._shutdown_workers()
 
         if self.global_step >= self.max_iterations:
             print(f"Training complete. Best CER: {self.best_cer:.4f}")
@@ -241,6 +238,23 @@ class Trainer:
 
         return metrics
 
+    def _shutdown_workers(self):
+        """Force-shutdown DataLoader workers so the process can exit cleanly."""
+        import multiprocessing
+        for loader in (self.train_loader, self.val_loader):
+            if loader is None:
+                continue
+            # The public way: delete the cached iterator which triggers cleanup
+            if hasattr(loader, '_iterator') and loader._iterator is not None:
+                try:
+                    loader._iterator._shutdown_workers()
+                except Exception:
+                    pass
+                loader._iterator = None
+        # As a last resort, forcibly terminate any lingering worker processes
+        for child in multiprocessing.active_children():
+            child.terminate()
+
     def _save_checkpoint(self, path: str, is_best: bool = False):
         """Save model and training state to disk."""
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -254,13 +268,47 @@ class Trainer:
         }
         torch.save(checkpoint, path)
 
-    def load_checkpoint(self, path: str):
-        """Resume training from a checkpoint."""
+    def load_checkpoint(self, path: str, reset_lr: bool = False):
+        """Resume training from a checkpoint.
+
+        If reset_lr is True, only model weights are loaded and a fresh LR
+        schedule is created for ``max_iterations`` new steps starting from the
+        checkpoint's global_step.  This is intended for fine-tuning on new data.
+        """
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint["model_state_dict"])
-        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-        self.scaler.load_state_dict(checkpoint["scaler_state_dict"])
-        self.global_step = checkpoint["step"]
-        self.best_cer = checkpoint.get("best_cer", float("inf"))
-        print(f"Resumed from step {self.global_step} (best CER: {self.best_cer:.4f})")
+
+        if reset_lr:
+            # Keep model weights, reset optimizer / scheduler / scaler for a
+            # fresh fine-tuning run.  max_iterations is treated as the number
+            # of NEW steps, so we shift it relative to the checkpoint step.
+            resumed_step = checkpoint["step"]
+            new_steps = self.max_iterations  # what the user passed via --steps
+            self.global_step = resumed_step
+            self.max_iterations = resumed_step + new_steps
+
+            # Rebuild optimizer (fresh momentum / Adam state)
+            lr = self.optimizer.defaults["lr"]
+            wd = self.optimizer.defaults["weight_decay"]
+            self.optimizer = torch.optim.AdamW(
+                self.model.parameters(), lr=lr, weight_decay=wd,
+            )
+
+            # Rebuild scheduler for the new step budget
+            self.scheduler = OneCycleLR(
+                self.optimizer,
+                max_lr=lr,
+                total_steps=new_steps,
+                pct_start=0.05,
+            )
+
+            self.scaler = GradScaler("cuda", enabled=self.use_amp)
+            self.best_cer = float("inf")
+            print(f"Loaded weights from step {resumed_step} (LR reset, {new_steps} new steps)")
+        else:
+            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+            self.scaler.load_state_dict(checkpoint["scaler_state_dict"])
+            self.global_step = checkpoint["step"]
+            self.best_cer = checkpoint.get("best_cer", float("inf"))
+            print(f"Resumed from step {self.global_step} (best CER: {self.best_cer:.4f})")

@@ -62,6 +62,7 @@ def main():
     parser.add_argument("--no-augment", action="store_true", help="Disable runtime augmentation (use when data was pre-augmented)")
     parser.add_argument("--bw", action="store_true", help="Use grayscale, high-contrast generator for validation set")
     parser.add_argument("--tag", default=None, help="Tag appended to checkpoint filenames, e.g. 'grayscale' -> best_grayscale.pt")
+    parser.add_argument("--reset-lr", action="store_true", help="Reset LR schedule when resuming (for fine-tuning). --steps becomes the number of NEW training steps")
     args = parser.parse_args()
 
     # Load config
@@ -185,7 +186,7 @@ def main():
 
     # Resume if requested
     if args.resume:
-        trainer.load_checkpoint(args.resume)
+        trainer.load_checkpoint(args.resume, reset_lr=args.reset_lr)
 
     # Train
     trainer.train()
