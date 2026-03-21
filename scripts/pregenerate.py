@@ -2,6 +2,7 @@
 
 Usage:
     python scripts/pregenerate.py [--count 500000] [--output data/train] [--augment]
+    python scripts/pregenerate.py --bw --bg-ratio 20 --count 500000 --output data/train
     python scripts/pregenerate.py --font-file path/to/font.ttf --count 10000
     python scripts/pregenerate.py --font-dir path/to/fonts/ --count 10000
 
@@ -69,7 +70,8 @@ def main():
     parser.add_argument("--format", default="jpg", choices=["jpg", "png"], help="Image format (default: jpg)")
     parser.add_argument("--jpeg-quality", type=int, default=90, help="JPEG quality when --format=jpg (default: 90)")
     parser.add_argument("--google-fonts", action="store_true", help="Use Google Fonts instead of system fonts (data/fonts/google_fonts.json)")
-    parser.add_argument("--simple", action="store_true", help="Grayscale output, solid/gradient backgrounds only, text/bg luminance contrast enforced")
+    parser.add_argument("--bw", action="store_true", help="Grayscale output with text/bg luminance contrast enforced")
+    parser.add_argument("--bg-ratio", type=int, default=0, metavar="PCT", help="Percentage of images that use random backgrounds from data/backgrounds (default: 0 = none)")
     parser.add_argument("--font-file", action="append", default=[], help="Path to a specific font file (.ttf/.otf) to use. Can be repeated.")
     parser.add_argument("--font-dir", default=None, help="Path to a directory of font files (.ttf/.otf) to use instead of the fonts cache")
     parser.add_argument("--workers", type=int, default=None, help="Number of worker processes (default: min(CPU count, 8))")
@@ -102,6 +104,13 @@ def main():
     else:
         fonts_json = "data/fonts/google_fonts.json" if args.google_fonts else data_cfg.get("fonts_cache", "data/fonts/fonts.json")
 
+    # Compute background probabilities from --bg-ratio
+    bg_ratio = max(0, min(100, args.bg_ratio)) / 100.0
+    remaining = 1.0 - bg_ratio
+    bg_solid_prob = remaining * 0.5
+    bg_gradient_prob = remaining * 0.5
+    bg_texture_prob = bg_ratio
+
     generator_kwargs = dict(
         fonts_json=fonts_json,
         font_paths=font_paths,
@@ -112,10 +121,10 @@ def main():
         min_text_len=data_cfg.get("min_text_len", 1),
         max_text_len=data_cfg.get("max_text_len", 50),
         word_mode_prob=data_cfg.get("word_mode_prob", 0.7),
-        bg_solid_prob=data_cfg.get("bg_solid_prob", 0.3),
-        bg_gradient_prob=data_cfg.get("bg_gradient_prob", 0.3),
-        bg_texture_prob=data_cfg.get("bg_texture_prob", 0.4),
-        simple=args.simple,
+        bg_solid_prob=bg_solid_prob,
+        bg_gradient_prob=bg_gradient_prob,
+        bg_texture_prob=bg_texture_prob,
+        bw=args.bw,
     )
 
     aug_kwargs = None

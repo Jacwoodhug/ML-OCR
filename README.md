@@ -87,6 +87,18 @@ Or bake augmentations in at generation time for maximum training speed (workers 
 python scripts/pregenerate.py --count 500000 --output data/train --augment
 ```
 
+By default, images use solid/gradient backgrounds only. Use `--bg-ratio` to include a percentage of real background textures from `data/backgrounds/`:
+
+```powershell
+python scripts/pregenerate.py --count 500000 --output data/train --bg-ratio 20
+```
+
+For grayscale, high-contrast output (ideal for documents/receipts):
+
+```powershell
+python scripts/pregenerate.py --count 500000 --output data/train --bw
+```
+
 Options:
 - `--count N` — Number of samples to generate
 - `--output DIR` — Output directory
@@ -95,7 +107,8 @@ Options:
 - `--format {jpg,png}` — Image format (default: `jpg`)
 - `--jpeg-quality N` — JPEG quality when `--format=jpg` (default: 90)
 - `--google-fonts` — Use Google Fonts instead of system fonts
-- `--simple` — Grayscale output, solid/gradient backgrounds only, text/bg luminance contrast enforced
+- `--bw` — Grayscale output with text/bg luminance contrast enforced
+- `--bg-ratio PCT` — Percentage of images that use random backgrounds from `data/backgrounds/` (default: 0 = none)
 - `--font-file PATH` — Path to a specific font file (.ttf/.otf). Can be repeated
 - `--font-dir DIR` — Path to a directory of font files to use instead of the fonts cache
 - `--workers N` — Number of worker processes (default: min(CPU count, 8))
@@ -143,7 +156,7 @@ Options:
 - `--data-dir DIR` — Pre-generated training data directory
 - `--lmdb PATH` — LMDB training dataset path (faster than `--data-dir` for large datasets)
 - `--no-augment` — Disable runtime augmentation (use when data was pre-generated with `--augment`)
-- `--simple` — Use simple (grayscale, high-contrast) generator for the validation set
+- `--bw` — Use grayscale, high-contrast generator for the validation set
 - `--tag NAME` — Tag appended to checkpoint filenames (e.g. `--tag grayscale` → `best_grayscale.pt`)
 
 The default config trains for 500K iterations with batch size 256, mixed precision (FP16) on GPU.
@@ -171,35 +184,35 @@ If you need high accuracy on a particular set of fonts (e.g. a specific document
 
 ### 1. Generate font-specific data
 
-Use `--font-file` and/or `--font-dir` to restrict data generation to your target fonts. Combine with `--simple` to produce clean, grayscale, high-contrast images — ideal for documents and receipts where backgrounds are plain:
+Use `--font-file` and/or `--font-dir` to restrict data generation to your target fonts. Combine with `--bw` to produce clean, grayscale, high-contrast images — ideal for documents and receipts where backgrounds are plain:
 
 ```powershell
 # Single font, grayscale
-python scripts/pregenerate.py --font-file path/to/consola.ttf --simple --count 20000 --output data/finetune_consolas
+python scripts/pregenerate.py --font-file path/to/consola.ttf --bw --count 20000 --output data/finetune_consolas
 
 # Multiple specific fonts
-python scripts/pregenerate.py --font-file font1.ttf --font-file font2.ttf --simple --count 20000 --output data/finetune_custom
+python scripts/pregenerate.py --font-file font1.ttf --font-file font2.ttf --bw --count 20000 --output data/finetune_custom
 
 # All fonts in a directory
-python scripts/pregenerate.py --font-dir path/to/my-fonts/ --simple --count 20000 --output data/finetune_custom
+python scripts/pregenerate.py --font-dir path/to/my-fonts/ --bw --count 20000 --output data/finetune_custom
 ```
 
-The `--simple` flag produces grayscale images with solid or gradient backgrounds and enforced luminance contrast between text and background. This is well-suited for fine-tuning on document-like data where color and textured backgrounds aren't relevant.
+The `--bw` flag produces grayscale images with enforced luminance contrast between text and background. This is well-suited for fine-tuning on document-like data where color and textured backgrounds aren't relevant.
 
-You can also generate full-color data with textured backgrounds (omit `--simple`) if your target domain has more visual variety.
+Use `--bg-ratio` to include a percentage of real background textures if your target domain has more visual variety (e.g. `--bg-ratio 20` for 20% textured backgrounds).
 
 ### 2. Fine-tune from a pretrained checkpoint
 
 Resume from your best general model and train on the font-specific data. Use `--tag` to keep the fine-tuned checkpoint separate:
 
 ```powershell
-python scripts/train.py --data-dir data/finetune_consolas --resume checkpoints/best.pt --steps 50000 --tag consolas --simple
+python scripts/train.py --data-dir data/finetune_consolas --resume checkpoints/best.pt --steps 50000 --tag consolas --bw
 ```
 
 Tips:
 - **Dataset size:** 10K–50K samples is usually enough for fine-tuning on a handful of fonts.
 - **Steps:** 20K–50K fine-tuning steps is a reasonable starting point; monitor CER on TensorBoard.
-- **`--simple` flag on training:** Generates the validation set in the same grayscale style so metrics reflect your target domain.
+- **`--bw` flag on training:** Generates the validation set in the same grayscale style so metrics reflect your target domain.
 - **Combining with `--augment`:** You can pre-bake augmentations (`--augment` on `pregenerate.py`) and then use `--no-augment` during training for maximum throughput.
 - **Mixing data:** For best results, consider mixing font-specific data with some general data to avoid catastrophic forgetting. Generate both datasets and combine them into one directory.
 

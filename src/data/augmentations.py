@@ -33,7 +33,7 @@ def get_augmentation_pipeline(
         # tightly cropped and text would be pushed out of frame.
         A.Affine(
             scale=(0.95, 1.05),
-            mode=0,  # constant border
+            border_mode=0,  # constant border
             p=0.2,
         ),
 

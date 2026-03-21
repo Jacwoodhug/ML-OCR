@@ -54,7 +54,7 @@ class SynthGenerator:
         bg_solid_prob: float = 0.3,
         bg_gradient_prob: float = 0.3,
         bg_texture_prob: float = 0.4,
-        simple: bool = False,
+        bw: bool = False,
         font_paths: list[str] | None = None,
     ):
         # Load font list
@@ -86,11 +86,9 @@ class SynthGenerator:
         self.max_text_len = max_text_len
         self.word_mode_prob = word_mode_prob
 
-        self.simple = simple
+        self.bw = bw
 
-        # Normalize background probabilities (simple mode disables textures)
-        if simple:
-            bg_texture_prob = 0.0
+        # Normalize background probabilities
         total = bg_solid_prob + bg_gradient_prob + bg_texture_prob
         self.bg_solid_prob = bg_solid_prob / total
         self.bg_gradient_prob = bg_gradient_prob / total
@@ -248,7 +246,7 @@ class SynthGenerator:
 
         # Generate background and pick text color
         bg = self._make_background(canvas_w, canvas_h)
-        if self.simple:
+        if self.bw:
             # Sample mean color of the text region to enforce contrast against whatever bg was generated
             x0 = max(0, pad_x)
             y0 = max(0, pad_y)
@@ -271,7 +269,7 @@ class SynthGenerator:
 
         img = bg.resize((target_w, self.img_height), Image.BILINEAR)
 
-        if self.simple:
+        if self.bw:
             img = img.convert("L").convert("RGB")
 
         return img, text

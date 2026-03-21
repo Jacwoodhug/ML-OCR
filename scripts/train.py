@@ -60,7 +60,7 @@ def main():
     parser.add_argument("--data-dir", default=None, help="Pre-generated training data directory (skips on-the-fly generation)")
     parser.add_argument("--lmdb", default=None, help="LMDB training dataset path (faster than --data-dir for large datasets)")
     parser.add_argument("--no-augment", action="store_true", help="Disable runtime augmentation (use when data was pre-augmented)")
-    parser.add_argument("--simple", action="store_true", help="Use simple (grayscale, high-contrast) generator for validation set")
+    parser.add_argument("--bw", action="store_true", help="Use grayscale, high-contrast generator for validation set")
     parser.add_argument("--tag", default=None, help="Tag appended to checkpoint filenames, e.g. 'grayscale' -> best_grayscale.pt")
     args = parser.parse_args()
 
@@ -97,7 +97,7 @@ def main():
         bg_solid_prob=data_cfg.get("bg_solid_prob", 0.3),
         bg_gradient_prob=data_cfg.get("bg_gradient_prob", 0.3),
         bg_texture_prob=data_cfg.get("bg_texture_prob", 0.4),
-        simple=args.simple,
+        bw=args.bw,
     )
 
     # Generate validation set
