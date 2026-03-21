@@ -2,6 +2,8 @@
 
 Usage:
     python scripts/pregenerate.py [--count 500000] [--output data/train] [--augment]
+    python scripts/pregenerate.py --font-file path/to/font.ttf --count 10000
+    python scripts/pregenerate.py --font-dir path/to/fonts/ --count 10000
 
 Generates images + labels.txt so training reads from disk instead of
 rendering on-the-fly, eliminating the CPU data-generation bottleneck.
@@ -68,6 +70,8 @@ def main():
     parser.add_argument("--jpeg-quality", type=int, default=90, help="JPEG quality when --format=jpg (default: 90)")
     parser.add_argument("--google-fonts", action="store_true", help="Use Google Fonts instead of system fonts (data/fonts/google_fonts.json)")
     parser.add_argument("--simple", action="store_true", help="Grayscale output, solid/gradient backgrounds only, text/bg luminance contrast enforced")
+    parser.add_argument("--font-file", action="append", default=[], help="Path to a specific font file (.ttf/.otf) to use. Can be repeated.")
+    parser.add_argument("--font-dir", default=None, help="Path to a directory of font files (.ttf/.otf) to use instead of the fonts cache")
     parser.add_argument("--workers", type=int, default=None, help="Number of worker processes (default: min(CPU count, 8))")
     args = parser.parse_args()
 
@@ -76,10 +80,31 @@ def main():
 
     data_cfg = config.get("data", {})
 
-    fonts_json = "data/fonts/google_fonts.json" if args.google_fonts else data_cfg.get("fonts_cache", "data/fonts/fonts.json")
+    # Resolve font source: explicit files/dir > google-fonts > config default
+    font_paths = None
+    fonts_json = None
+    if args.font_file or args.font_dir:
+        font_paths = list(args.font_file)
+        if args.font_dir:
+            font_exts = {".ttf", ".otf", ".TTF", ".OTF"}
+            if not os.path.isdir(args.font_dir):
+                print(f"Error: --font-dir '{args.font_dir}' is not a directory")
+                sys.exit(1)
+            font_paths.extend(
+                os.path.join(args.font_dir, f)
+                for f in sorted(os.listdir(args.font_dir))
+                if os.path.splitext(f)[1] in font_exts
+            )
+        if not font_paths:
+            print("Error: no font files found from --font-file / --font-dir")
+            sys.exit(1)
+        print(f"Using {len(font_paths)} custom font(s)")
+    else:
+        fonts_json = "data/fonts/google_fonts.json" if args.google_fonts else data_cfg.get("fonts_cache", "data/fonts/fonts.json")
 
     generator_kwargs = dict(
         fonts_json=fonts_json,
+        font_paths=font_paths,
         backgrounds_dir=data_cfg.get("backgrounds_dir", "data/backgrounds"),
         img_height=data_cfg.get("img_height", 32),
         img_min_width=data_cfg.get("img_min_width", 32),

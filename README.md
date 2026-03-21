@@ -87,6 +87,21 @@ Or bake augmentations in at generation time for maximum training speed (workers 
 python scripts/pregenerate.py --count 500000 --output data/train --augment
 ```
 
+To generate data for a **specific font** (useful for fine-tuning):
+
+```powershell
+# Single font file
+python scripts/pregenerate.py --font-file "C:\Windows\Fonts\arial.ttf" --count 10000 --output data/train_arial
+
+# Multiple font files
+python scripts/pregenerate.py --font-file font1.ttf --font-file font2.ttf --count 10000 --output data/train_custom
+
+# All fonts in a directory
+python scripts/pregenerate.py --font-dir path/to/fonts/ --count 10000 --output data/train_custom
+```
+
+`--font-file` and `--font-dir` can be combined. They override the default fonts cache and `--google-fonts`.
+
 > Generation is resumable — if interrupted, re-run the same command and it picks up where it left off.
 
 ### 6. Start training

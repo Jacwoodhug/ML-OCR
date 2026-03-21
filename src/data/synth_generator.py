@@ -43,7 +43,7 @@ class SynthGenerator:
 
     def __init__(
         self,
-        fonts_json: str,
+        fonts_json: str | None = None,
         backgrounds_dir: str | None = None,
         img_height: int = 32,
         img_min_width: int = 32,
@@ -55,12 +55,18 @@ class SynthGenerator:
         bg_gradient_prob: float = 0.3,
         bg_texture_prob: float = 0.4,
         simple: bool = False,
+        font_paths: list[str] | None = None,
     ):
         # Load font list
-        with open(fonts_json, "r", encoding="utf-8") as f:
-            self.fonts = json.load(f)
+        if font_paths:
+            self.fonts = list(font_paths)
+        elif fonts_json:
+            with open(fonts_json, "r", encoding="utf-8") as f:
+                self.fonts = json.load(f)
+        else:
+            raise ValueError("Must provide either fonts_json or font_paths")
         if not self.fonts:
-            raise ValueError(f"No fonts loaded from {fonts_json}")
+            raise ValueError("No fonts loaded")
 
         # Load background image paths
         self.bg_images: list[str] = []
