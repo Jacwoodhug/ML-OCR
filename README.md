@@ -22,7 +22,9 @@ pip install -r requirements.txt
 
 ## Prepare Data
 
-### 3. Collect system fonts
+### 3. Collect fonts
+
+**Option A — Windows system fonts** (no API key needed)
 
 Scans Windows fonts, filters out symbol/icon fonts (Wingdings, Webdings, etc.) via blocklist + automated render test, and caches the approved font list.
 
@@ -31,6 +33,31 @@ python scripts/collect_fonts.py
 ```
 
 Output: `data/fonts/fonts.json`
+
+**Option B — Google Fonts** (recommended for more variety)
+
+Downloads the most popular Latin-subset fonts from Google Fonts. Requires a free API key — get one at [console.cloud.google.com](https://console.cloud.google.com/) under APIs & Services → Credentials (no billing required).
+
+Add your key to `.env`:
+
+```
+GOOGLE_FONTS_API_KEY=your_api_key_here
+```
+
+Then run:
+
+```powershell
+python scripts/download_google_fonts.py --top-n 200
+```
+
+Output: `data/fonts/google/` (.ttf files) + `data/fonts/google_fonts.json`
+
+Pass `--out-json data/fonts/fonts.json` to write directly to the path `SynthGenerator` expects, or keep both and merge them manually.
+
+Options:
+- `--top-n N` — Number of top fonts to fetch by popularity (default: 200)
+- `--output DIR` — Directory to save .ttf files (default: `data/fonts/google`)
+- `--out-json PATH` — Output JSON path (default: `data/fonts/google_fonts.json`)
 
 ### 4. Download background textures
 
@@ -204,13 +231,15 @@ ML-OCR/
 │       ├── export_onnx.py       # PyTorch → ONNX export
 │       └── predictor.py         # ONNX Runtime inference wrapper
 ├── scripts/
-│   ├── collect_fonts.py         # Font enumeration & filtering
+│   ├── collect_fonts.py         # Font enumeration & filtering (Windows system fonts)
+│   ├── download_google_fonts.py # Download top fonts from Google Fonts API
 │   ├── download_backgrounds.py  # DTD dataset download
 │   ├── pregenerate.py           # Pre-generate training data to disk
 │   ├── train.py                 # Training entry point
 │   ├── evaluate.py              # Evaluation entry point
 │   ├── predict_gui.py           # GUI for interactive inference
 │   └── benchmark.py             # Inference speed benchmarking
+├── .env                         # API keys (not committed)
 ├── requirements.txt
 └── PLAN.md                      # Full project plan & design decisions
 ```

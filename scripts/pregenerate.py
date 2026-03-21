@@ -19,9 +19,43 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import yaml
+from concurrent.futures import ProcessPoolExecutor
 from PIL import Image
-from src.data.augmentations import apply_augmentation, get_augmentation_pipeline
+from tqdm import tqdm
 from src.data.synth_generator import SynthGenerator
+
+# ---------------------------------------------------------------------------
+# Per-worker state (populated by _worker_init, isolated per process)
+# ---------------------------------------------------------------------------
+_worker_state: dict = {}
+
+
+def _worker_init(generator_kwargs: dict, aug_kwargs: dict | None) -> None:
+    import random
+    from src.data.augmentations import apply_augmentation, get_augmentation_pipeline
+    random.seed(os.getpid())
+    _worker_state["generator"] = SynthGenerator(**generator_kwargs)
+    _worker_state["apply_augmentation"] = apply_augmentation
+    _worker_state["aug_pipeline"] = (
+        get_augmentation_pipeline(**aug_kwargs) if aug_kwargs is not None else None
+    )
+
+
+def _generate_and_save(task: tuple) -> str:
+    """Generate one sample, save image to disk, return label text."""
+    i, images_dir, fmt, quality = task
+    img, text = _worker_state["generator"].generate()
+    aug = _worker_state["aug_pipeline"]
+    if aug is not None:
+        img_np = np.array(img, dtype=np.uint8)
+        img_np = _worker_state["apply_augmentation"](img_np, aug)
+        img = Image.fromarray(img_np)
+    img_file = os.path.join(images_dir, f"{i:06d}.{fmt}")
+    if fmt == "jpg":
+        img.save(img_file, "JPEG", quality=quality)
+    else:
+        img.save(img_file)
+    return text
 
 
 def main():
@@ -32,6 +66,8 @@ def main():
     parser.add_argument("--augment", action="store_true", help="Bake augmentations into saved images")
     parser.add_argument("--format", default="jpg", choices=["jpg", "png"], help="Image format (default: jpg)")
     parser.add_argument("--jpeg-quality", type=int, default=90, help="JPEG quality when --format=jpg (default: 90)")
+    parser.add_argument("--google-fonts", action="store_true", help="Use Google Fonts instead of system fonts (data/fonts/google_fonts.json)")
+    parser.add_argument("--workers", type=int, default=None, help="Number of worker processes (default: min(CPU count, 8))")
     args = parser.parse_args()
 
     with open(args.config, "r", encoding="utf-8") as f:
@@ -39,8 +75,10 @@ def main():
 
     data_cfg = config.get("data", {})
 
-    generator = SynthGenerator(
-        fonts_json=data_cfg.get("fonts_cache", "data/fonts/fonts.json"),
+    fonts_json = "data/fonts/google_fonts.json" if args.google_fonts else data_cfg.get("fonts_cache", "data/fonts/fonts.json")
+
+    generator_kwargs = dict(
+        fonts_json=fonts_json,
         backgrounds_dir=data_cfg.get("backgrounds_dir", "data/backgrounds"),
         img_height=data_cfg.get("img_height", 32),
         img_min_width=data_cfg.get("img_min_width", 32),
@@ -53,11 +91,10 @@ def main():
         bg_texture_prob=data_cfg.get("bg_texture_prob", 0.4),
     )
 
-    aug_pipeline = None
+    aug_kwargs = None
     if args.augment:
         aug_config = config.get("data", {}).get("augmentation", {})
         aug_kwargs = {k: v for k, v in aug_config.items() if k != "enabled"}
-        aug_pipeline = get_augmentation_pipeline(**aug_kwargs)
         print("Augmentation: enabled (baking into images)")
     else:
         print("Augmentation: disabled (clean images)")
@@ -93,26 +130,26 @@ def main():
         if start_idx > 0:
             print(f"Resuming from sample {start_idx} (found existing labels)")
 
-    print(f"Generating {args.count - start_idx} samples to {args.output}/ ...")
+    n_workers = args.workers or min(os.cpu_count() or 1, 8)
+    print(f"Generating {args.count - start_idx} samples to {args.output}/ (workers={n_workers}) ...")
+
+    tasks = (
+        (i, images_dir, args.format, args.jpeg_quality)
+        for i in range(start_idx, args.count)
+    )
 
     with open(labels_path, "a", encoding="utf-8") as f:
-        for i in range(start_idx, args.count):
-            img, text = generator.generate()
-            if aug_pipeline is not None:
-                img_np = np.array(img, dtype=np.uint8)
-                img_np = apply_augmentation(img_np, aug_pipeline)
-                img = Image.fromarray(img_np)
-            ext = "." + args.format
-            img_file = os.path.join(images_dir, f"{i:06d}{ext}")
-            if args.format == "jpg":
-                img.save(img_file, "JPEG", quality=args.jpeg_quality, optimize=True)
-            else:
-                img.save(img_file)
-            f.write(text + "\n")
-
-            if (i + 1) % 10_000 == 0:
-                print(f"  {i + 1:,} / {args.count:,}")
-                f.flush()
+        with ProcessPoolExecutor(
+            max_workers=n_workers,
+            initializer=_worker_init,
+            initargs=(generator_kwargs, aug_kwargs),
+        ) as executor:
+            with tqdm(total=args.count, initial=start_idx, unit="img", dynamic_ncols=True) as pbar:
+                for n, text in enumerate(executor.map(_generate_and_save, tasks, chunksize=64)):
+                    f.write(text + "\n")
+                    pbar.update(1)
+                    if (start_idx + n + 1) % 10_000 == 0:
+                        f.flush()
 
     print(f"Done. Saved {args.count:,} samples to {args.output}/")
 
