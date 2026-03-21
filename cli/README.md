@@ -54,4 +54,4 @@ image.png: Hello World  (12.3ms)
 
 ## Black-and-white conversion
 
-By default, colour images are converted to grayscale by selecting the RGB channel with the highest contrast (standard deviation). This matches the behaviour of the Gradio GUI. Use `--no-bw` to skip this step if your images are already preprocessed.
+By default, color images are converted to grayscale by selecting the RGB channel with the highest contrast (standard deviation). This matches the behaviour of the Gradio GUI. Use `--no-bw` to skip this step if your images are already preprocessed.

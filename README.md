@@ -1,13 +1,13 @@
 # ML-OCR
 
-A from-scratch OCR system trained entirely on synthetic data. Uses a CRNN architecture (MobileNetV3-Small + BiLSTM + CTC) for fast inference on both CPU and GPU.
+A from-scratch OCR system trained entirely on synthetic data. Uses a CRNN architecture (MobileNetV3-Small + BiLSTM + CTC) for fast, single-line text recognition on both CPU and GPU.
 
 ## Setup
 
-### 1. Create virtual environment (Python 3.11)
+### 1. Create virtual environment (Python 3.11+)
 
 ```powershell
-& "C:\Users\jacwo\AppData\Local\Programs\Python\Python311\python.exe" -m venv .venv
+python -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
 
@@ -81,38 +81,50 @@ Generate clean images (augmentation applied at training time):
 python scripts/pregenerate.py --count 500000 --output data/train
 ```
 
-Or bake augmentations in at generation time for maximum training speed (workers just decode PNGs):
+Or bake augmentations in at generation time for maximum training speed (workers just decode images):
 
 ```powershell
 python scripts/pregenerate.py --count 500000 --output data/train --augment
 ```
 
-To generate data for a **specific font** (useful for fine-tuning):
-
-```powershell
-# Single font file
-python scripts/pregenerate.py --font-file "C:\Windows\Fonts\arial.ttf" --count 10000 --output data/train_arial
-
-# Multiple font files
-python scripts/pregenerate.py --font-file font1.ttf --font-file font2.ttf --count 10000 --output data/train_custom
-
-# All fonts in a directory
-python scripts/pregenerate.py --font-dir path/to/fonts/ --count 10000 --output data/train_custom
-```
-
-`--font-file` and `--font-dir` can be combined. They override the default fonts cache and `--google-fonts`.
+Options:
+- `--count N` — Number of samples to generate
+- `--output DIR` — Output directory
+- `--config CONFIG` — Config file (default: `config/default.yaml`)
+- `--augment` — Bake augmentations into saved images
+- `--format {jpg,png}` — Image format (default: `jpg`)
+- `--jpeg-quality N` — JPEG quality when `--format=jpg` (default: 90)
+- `--google-fonts` — Use Google Fonts instead of system fonts
+- `--simple` — Grayscale output, solid/gradient backgrounds only, text/bg luminance contrast enforced
+- `--font-file PATH` — Path to a specific font file (.ttf/.otf). Can be repeated
+- `--font-dir DIR` — Path to a directory of font files to use instead of the fonts cache
+- `--workers N` — Number of worker processes (default: min(CPU count, 8))
 
 > Generation is resumable — if interrupted, re-run the same command and it picks up where it left off.
 
-### 6. Start training
+### 6. Convert to LMDB (optional, for large datasets)
 
-With pre-generated clean data (augmentation runs at load time):
+For large datasets, converting to LMDB gives faster random-access reads during training:
+
+```powershell
+python scripts/convert_to_lmdb.py --input data/train --output data/train.lmdb
+```
+
+### 7. Start training
+
+With pre-generated data (augmentation runs at load time):
 
 ```powershell
 python scripts/train.py --data-dir data/train
 ```
 
-With pre-augmented data (fastest — no per-sample CPU work during training):
+With an LMDB dataset (fastest I/O for large datasets):
+
+```powershell
+python scripts/train.py --lmdb data/train.lmdb
+```
+
+With pre-augmented data (no per-sample CPU work during training):
 
 ```powershell
 python scripts/train.py --data-dir data/train --no-augment
@@ -129,9 +141,12 @@ Options:
 - `--resume CHECKPOINT` — Resume from a saved checkpoint
 - `--steps N` — Override max training iterations (default: 500K)
 - `--data-dir DIR` — Pre-generated training data directory
+- `--lmdb PATH` — LMDB training dataset path (faster than `--data-dir` for large datasets)
 - `--no-augment` — Disable runtime augmentation (use when data was pre-generated with `--augment`)
+- `--simple` — Use simple (grayscale, high-contrast) generator for the validation set
+- `--tag NAME` — Tag appended to checkpoint filenames (e.g. `--tag grayscale` → `best_grayscale.pt`)
 
-The default config trains for 500K iterations with batch size 256, mixed precision (FP16) on GPU. Training data is generated on-the-fly — no dataset to download.
+The default config trains for 500K iterations with batch size 256, mixed precision (FP16) on GPU.
 
 **Monitor training** with TensorBoard:
 
@@ -149,6 +164,46 @@ Edit `config/default.yaml` to change:
 - `training.val_interval` — how often to validate (in steps)
 - `data.img_height` — training image height (default 32)
 - `model.lstm_hidden_size` — LSTM width (default 256)
+
+## Fine-Tuning for Specific Fonts
+
+If you need high accuracy on a particular set of fonts (e.g. a specific document typeface, receipt font, or display font), you can fine-tune a pretrained model on data generated exclusively from those fonts.
+
+### 1. Generate font-specific data
+
+Use `--font-file` and/or `--font-dir` to restrict data generation to your target fonts. Combine with `--simple` to produce clean, grayscale, high-contrast images — ideal for documents and receipts where backgrounds are plain:
+
+```powershell
+# Single font, grayscale
+python scripts/pregenerate.py --font-file path/to/consola.ttf --simple --count 20000 --output data/finetune_consolas
+
+# Multiple specific fonts
+python scripts/pregenerate.py --font-file font1.ttf --font-file font2.ttf --simple --count 20000 --output data/finetune_custom
+
+# All fonts in a directory
+python scripts/pregenerate.py --font-dir path/to/my-fonts/ --simple --count 20000 --output data/finetune_custom
+```
+
+The `--simple` flag produces grayscale images with solid or gradient backgrounds and enforced luminance contrast between text and background. This is well-suited for fine-tuning on document-like data where color and textured backgrounds aren't relevant.
+
+You can also generate full-color data with textured backgrounds (omit `--simple`) if your target domain has more visual variety.
+
+### 2. Fine-tune from a pretrained checkpoint
+
+Resume from your best general model and train on the font-specific data. Use `--tag` to keep the fine-tuned checkpoint separate:
+
+```powershell
+python scripts/train.py --data-dir data/finetune_consolas --resume checkpoints/best.pt --steps 50000 --tag consolas --simple
+```
+
+Tips:
+- **Dataset size:** 10K–50K samples is usually enough for fine-tuning on a handful of fonts.
+- **Steps:** 20K–50K fine-tuning steps is a reasonable starting point; monitor CER on TensorBoard.
+- **`--simple` flag on training:** Generates the validation set in the same grayscale style so metrics reflect your target domain.
+- **Combining with `--augment`:** You can pre-bake augmentations (`--augment` on `pregenerate.py`) and then use `--no-augment` during training for maximum throughput.
+- **Mixing data:** For best results, consider mixing font-specific data with some general data to avoid catastrophic forgetting. Generate both datasets and combine them into one directory.
+
+The fine-tuned checkpoint will be saved as `checkpoints/best_consolas.pt` (matching the `--tag`).
 
 ## Evaluate
 
@@ -204,11 +259,21 @@ The `--model` flag is optional — you can also browse for the ONNX file inside 
 - **Click the preview area** — also opens the file picker
 
 **Running inference:**
-- Click **▶ Run OCR** to recognise the loaded image
+- Click **Run OCR** to recognise the loaded image
 - The predicted text appears in the result box at the bottom
 - Click **Copy** to copy the result to the clipboard
 
 > Images should be pre-cropped to the text region. The model expects a single line of text.
+
+### CLI Inference
+
+A lightweight standalone script (no dependency on `src/`) is provided in `cli/`:
+
+```powershell
+python cli/ocr.py image.png
+```
+
+Auto-detects `.onnx` models in the `cli/` folder. Supports `--gpu` for CUDA inference and batch processing of multiple images.
 
 ### Benchmark inference speed
 
@@ -232,15 +297,15 @@ ML-OCR/
 │   ├── data/
 │   │   ├── alphabet.py          # Character set (a-z, A-Z, 0-9, punctuation)
 │   │   ├── augmentations.py     # Albumentations pipeline
-│   │   ├── dataset.py           # PyTorch Dataset + variable-width collate
-│   │   └── synth_generator.py   # On-the-fly synthetic image generation
+│   │   ├── dataset.py           # PyTorch Datasets (on-the-fly, disk, LMDB)
+│   │   └── synth_generator.py   # Synthetic image generation engine
 │   ├── model/
 │   │   ├── backbone.py          # MobileNetV3-Small feature extractor
 │   │   ├── sequence.py          # BiLSTM layers
 │   │   ├── crnn.py              # Full CRNN model
 │   │   └── ctc_decoder.py       # Greedy + beam search decoders
 │   ├── training/
-│   │   ├── trainer.py           # Training loop (AMP, checkpointing)
+│   │   ├── trainer.py           # Training loop (AMP, checkpointing, torch.compile)
 │   │   └── metrics.py           # CER, WER, accuracy
 │   └── inference/
 │       ├── export_onnx.py       # PyTorch → ONNX export
@@ -250,13 +315,18 @@ ML-OCR/
 │   ├── download_google_fonts.py # Download top fonts from Google Fonts API
 │   ├── download_backgrounds.py  # DTD dataset download
 │   ├── pregenerate.py           # Pre-generate training data to disk
+│   ├── convert_to_lmdb.py      # Convert dataset to LMDB format
+│   ├── convert_to_jpeg.py       # Batch convert PNG dataset to JPEG
 │   ├── train.py                 # Training entry point
 │   ├── evaluate.py              # Evaluation entry point
-│   ├── predict_gui.py           # GUI for interactive inference
+│   ├── predict_gui.py           # Gradio GUI for interactive inference
+│   ├── smoke_train.py           # Quick 50-step smoke test
 │   └── benchmark.py             # Inference speed benchmarking
+├── cli/
+│   └── ocr.py                   # Lightweight standalone CLI for inference
 ├── .env                         # API keys (not committed)
 ├── requirements.txt
-└── PLAN.md                      # Full project plan & design decisions
+└── PLAN.md                      # Project plan & design decisions
 ```
 
 ## Quick Smoke Test
