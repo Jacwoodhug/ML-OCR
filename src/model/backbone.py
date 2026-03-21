@@ -69,9 +69,6 @@ class MobileNetV3Backbone(nn.Module):
             nn.BatchNorm2d(128),
         )
 
-        # Collapse height to 1 (adaptive pool along H dimension)
-        self.pool = nn.AdaptiveAvgPool2d((1, None))
-
         self.out_channels = 128
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -82,7 +79,7 @@ class MobileNetV3Backbone(nn.Module):
         Returns:
             (B, C, 1, W') feature maps where W' = W // 4
         """
-        x = self.early(x)   # (B, 24, H/4, W/4)
-        x = self.extra(x)   # (B, 96, H/4, W/4)
-        x = self.pool(x)    # (B, 96, 1, W/4)
+        x = self.early(x)             # (B, 16, H/4, W/4)
+        x = self.extra(x)             # (B, 128, H/4, W/4)
+        x = x.mean(dim=2, keepdim=True)  # (B, 128, 1, W/4) — collapse height
         return x

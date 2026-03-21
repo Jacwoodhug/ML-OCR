@@ -150,6 +150,14 @@ def main():
         lstm_dropout=model_cfg.get("lstm_dropout", 0.1),
     )
 
+    if model_cfg.get("compile", True):
+        import platform
+        if platform.system() == "Windows":
+            print("torch.compile skipped (Triton not available on Windows)")
+        else:
+            print("Compiling model with torch.compile...")
+            model = torch.compile(model)
+
     param_count = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {param_count:,}")
     print(f"Num classes (incl. blank): {NUM_CLASSES}")

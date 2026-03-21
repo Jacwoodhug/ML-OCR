@@ -11,7 +11,7 @@ import sys
 import torch
 import yaml
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from src.data.alphabet import NUM_CLASSES
 from src.model.crnn import CRNN
@@ -65,7 +65,9 @@ def main():
         backbone_pretrained=False,
         lstm_hidden_size=model_cfg.get("lstm_hidden_size", 256),
         lstm_num_layers=model_cfg.get("lstm_num_layers", 2),
-        lstm_dropout=0.0,  # no dropout at inference
+        # Keep the same dropout value as training so the Sequential layer
+        # indices match the checkpoint. model.eval() disables dropout at runtime.
+        lstm_dropout=model_cfg.get("lstm_dropout", 0.1),
     )
 
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)

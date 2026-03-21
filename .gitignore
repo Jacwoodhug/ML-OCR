@@ -1,2 +1,7 @@
-data
+/data
 .venv
+__pycache__
+checkpoints/
+checkpoints - Copy/
+exports/
+runs/

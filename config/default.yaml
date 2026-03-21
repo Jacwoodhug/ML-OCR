@@ -42,12 +42,13 @@ model:
   lstm_hidden_size: 256
   lstm_num_layers: 2
   lstm_dropout: 0.1
+  compile: true                        # torch.compile for ~20-30% GPU speedup
 
 # Training
 training:
-  batch_size: 256
+  batch_size: 512
   num_workers: 8
-  prefetch_factor: 4
+  prefetch_factor: 8
   max_iterations: 500000
   val_interval: 2000                   # validate every N iterations
   checkpoint_interval: 10000           # save checkpoint every N iterations
@@ -55,12 +56,12 @@ training:
 
   optimizer:
     type: "adamw"
-    lr: 1.0e-3
+    lr: 2.0e-3
     weight_decay: 1.0e-4
 
   scheduler:
     type: "one_cycle"
-    max_lr: 1.0e-3
+    max_lr: 2.0e-3
     pct_start: 0.05                    # 5% warmup
 
   amp: true                            # mixed precision training

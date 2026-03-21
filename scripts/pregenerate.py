@@ -30,6 +30,8 @@ def main():
     parser.add_argument("--output", default="data/train", help="Output directory")
     parser.add_argument("--config", default="config/default.yaml", help="Config file")
     parser.add_argument("--augment", action="store_true", help="Bake augmentations into saved images")
+    parser.add_argument("--format", default="jpg", choices=["jpg", "png"], help="Image format (default: jpg)")
+    parser.add_argument("--jpeg-quality", type=int, default=90, help="JPEG quality when --format=jpg (default: 90)")
     args = parser.parse_args()
 
     with open(args.config, "r", encoding="utf-8") as f:
@@ -100,7 +102,12 @@ def main():
                 img_np = np.array(img, dtype=np.uint8)
                 img_np = apply_augmentation(img_np, aug_pipeline)
                 img = Image.fromarray(img_np)
-            img.save(os.path.join(images_dir, f"{i:06d}.png"))
+            ext = "." + args.format
+            img_file = os.path.join(images_dir, f"{i:06d}{ext}")
+            if args.format == "jpg":
+                img.save(img_file, "JPEG", quality=args.jpeg_quality, optimize=True)
+            else:
+                img.save(img_file)
             f.write(text + "\n")
 
             if (i + 1) % 10_000 == 0:

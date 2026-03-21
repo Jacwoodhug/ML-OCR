@@ -126,13 +126,47 @@ Reports Character Error Rate (CER), Word Error Rate (WER), and sequence-level ac
 
 ### Export to ONNX
 
+First install the `onnx` package if you haven't already:
+
 ```powershell
-python -m src.inference.export_onnx --checkpoint checkpoints/best.pt
+pip install onnx
+```
+
+```powershell
+python src/inference/export_onnx.py --checkpoint checkpoints/best.pt --output exports/model.onnx
 ```
 
 Options:
 - `--output PATH` — ONNX output path (default: `exports/model.onnx`)
 - `--config CONFIG` — Config file
+
+### GUI Inference
+
+Install Gradio if you haven't already:
+
+```powershell
+pip install gradio
+```
+
+Launch the graphical interface to run OCR on any image interactively:
+
+```powershell
+python scripts/predict_gui.py --model exports/model.onnx
+```
+
+The `--model` flag is optional — you can also browse for the ONNX file inside the app.
+
+**Loading an image:**
+- **Open image…** — file picker (PNG, JPG, BMP, TIFF, WebP)
+- **Paste (Ctrl+V)** — paste a screenshot or copied image directly from the clipboard
+- **Click the preview area** — also opens the file picker
+
+**Running inference:**
+- Click **▶ Run OCR** to recognise the loaded image
+- The predicted text appears in the result box at the bottom
+- Click **Copy** to copy the result to the clipboard
+
+> Images should be pre-cropped to the text region. The model expects a single line of text.
 
 ### Benchmark inference speed
 
@@ -175,6 +209,7 @@ ML-OCR/
 │   ├── pregenerate.py           # Pre-generate training data to disk
 │   ├── train.py                 # Training entry point
 │   ├── evaluate.py              # Evaluation entry point
+│   ├── predict_gui.py           # GUI for interactive inference
 │   └── benchmark.py             # Inference speed benchmarking
 ├── requirements.txt
 └── PLAN.md                      # Full project plan & design decisions
