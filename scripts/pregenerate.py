@@ -2,8 +2,8 @@
 
 Usage:
     python scripts/pregenerate.py [--count 500000] [--output data/train] [--augment]
+    python scripts/pregenerate.py --lmdb data/train.lmdb --count 500000 --bw --val-count 10000
     python scripts/pregenerate.py --bw --bg-ratio 20 --count 500000 --output data/train
-    python scripts/pregenerate.py --lmdb data/train.lmdb --count 500000 --bw
     python scripts/pregenerate.py --font-file path/to/font.ttf --count 10000
     python scripts/pregenerate.py --font-dir path/to/fonts/ --count 10000
 
@@ -11,6 +11,7 @@ Generates images + labels.txt so training reads from disk instead of
 rendering on-the-fly, eliminating the CPU data-generation bottleneck.
 
 Use --lmdb to write directly to LMDB format, skipping intermediate files.
+Use --val-count N to also generate a validation set in the same style.
 
 Use --augment to bake augmentations into the saved images. Combined with
 --no-augment in train.py, this removes all per-sample CPU work from the
@@ -127,11 +128,11 @@ def _build_generator_kwargs(args, data_cfg):
     )
 
 
-def _generate_to_files(args, generator_kwargs, aug_kwargs):
+def _generate_to_files(args, output_dir, count, generator_kwargs, aug_kwargs, label=""):
     """Generate samples as individual image files + labels.txt."""
-    images_dir = os.path.join(args.output, "images")
+    images_dir = os.path.join(output_dir, "images")
     os.makedirs(images_dir, exist_ok=True)
-    labels_path = os.path.join(args.output, "labels.txt")
+    labels_path = os.path.join(output_dir, "labels.txt")
 
     # Check for existing partial generation to allow resuming
     start_idx = 0
@@ -150,18 +151,18 @@ def _generate_to_files(args, generator_kwargs, aug_kwargs):
                         f.write(line + "\n")
             start_idx = len(lines)
 
-        if start_idx >= args.count:
-            print(f"Already have {start_idx} samples (requested {args.count}). Nothing to do.")
+        if start_idx >= count:
+            print(f"{label}Already have {start_idx} samples (requested {count}). Nothing to do.")
             return
         if start_idx > 0:
-            print(f"Resuming from sample {start_idx} (found existing labels)")
+            print(f"{label}Resuming from sample {start_idx} (found existing labels)")
 
     n_workers = args.workers or min(os.cpu_count() or 1, 8)
-    print(f"Generating {args.count - start_idx} samples to {args.output}/ (workers={n_workers}) ...")
+    print(f"{label}Generating {count - start_idx} samples to {output_dir}/ (workers={n_workers}) ...")
 
     tasks = (
         (i, images_dir, args.format, args.jpeg_quality)
-        for i in range(start_idx, args.count)
+        for i in range(start_idx, count)
     )
 
     completed = 0
@@ -172,7 +173,8 @@ def _generate_to_files(args, generator_kwargs, aug_kwargs):
             initargs=(generator_kwargs, aug_kwargs),
         )
         try:
-            with tqdm(total=args.count, initial=start_idx, unit="img", dynamic_ncols=True) as pbar:
+            with tqdm(total=count, initial=start_idx, unit="img", dynamic_ncols=True,
+                      desc=label.strip() if label else None) as pbar:
                 for completed, text in enumerate(executor.map(_generate_and_save, tasks, chunksize=64), 1):
                     f.write(text + "\n")
                     pbar.update(1)
@@ -182,12 +184,12 @@ def _generate_to_files(args, generator_kwargs, aug_kwargs):
             print("\nInterrupted — stopping workers...")
             executor.shutdown(wait=False, cancel_futures=True)
             f.flush()
-            print(f"Saved {start_idx + completed:,} samples. Resume with the same command.")
-            return
+            print(f"{label}Saved {start_idx + completed:,} samples. Resume with the same command.")
+            raise
         else:
             executor.shutdown(wait=True)
 
-    print(f"Done. Saved {args.count:,} samples to {args.output}/")
+    print(f"{label}Done. Saved {count:,} samples to {output_dir}/")
 
 
 def _generate_to_lmdb(args, generator_kwargs, aug_kwargs):
@@ -256,7 +258,8 @@ def _generate_to_lmdb(args, generator_kwargs, aug_kwargs):
         txn.commit()
         executor.shutdown(wait=False, cancel_futures=True)
         env.close()
-        db_size = sum(os.path.getsize(os.path.join(lmdb_path, f)) for f in os.listdir(lmdb_path))
+        db_size = sum(os.path.getsize(os.path.join(lmdb_path, f))
+                      for f in os.listdir(lmdb_path) if not os.path.isdir(os.path.join(lmdb_path, f)))
         print(f"Saved {total_written:,} samples ({db_size / 1e9:.2f} GB). Resume with the same command.")
         return
     else:
@@ -267,13 +270,16 @@ def _generate_to_lmdb(args, generator_kwargs, aug_kwargs):
     txn.commit()
     env.close()
 
-    db_size = sum(os.path.getsize(os.path.join(lmdb_path, f)) for f in os.listdir(lmdb_path))
+    db_size = sum(os.path.getsize(os.path.join(lmdb_path, f))
+                  for f in os.listdir(lmdb_path) if not os.path.isdir(os.path.join(lmdb_path, f)))
     print(f"Done. Saved {total:,} samples to {lmdb_path} ({db_size / 1e9:.2f} GB)")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Pre-generate synthetic training data")
-    parser.add_argument("--count", type=int, default=500_000, help="Number of samples to generate")
+    parser.add_argument("--count", type=int, default=500_000, help="Number of training samples to generate")
+    parser.add_argument("--val-count", type=int, default=10_000, help="Number of validation samples to generate (saved to val/ subdirectory, 0 to skip)")
+    parser.add_argument("--no-val", action="store_true", help="Skip validation set generation")
     parser.add_argument("--output", default="data/train", help="Output directory (for file-based output)")
     parser.add_argument("--lmdb", default=None, help="Write directly to LMDB at this path (skips intermediate files)")
     parser.add_argument("--config", default="config/default.yaml", help="Config file")
@@ -303,10 +309,23 @@ def main():
     else:
         print("Augmentation: disabled (clean images)")
 
-    if args.lmdb:
-        _generate_to_lmdb(args, generator_kwargs, aug_kwargs)
-    else:
-        _generate_to_files(args, generator_kwargs, aug_kwargs)
+    try:
+        if args.lmdb:
+            _generate_to_lmdb(args, generator_kwargs, aug_kwargs)
+            # Generate val set as files inside the LMDB directory
+            if args.val_count > 0 and not args.no_val:
+                val_dir = os.path.join(args.lmdb, "val")
+                print(f"\nGenerating validation set ({args.val_count} samples)...")
+                _generate_to_files(args, val_dir, args.val_count, generator_kwargs, None, label="[val] ")
+        else:
+            _generate_to_files(args, args.output, args.count, generator_kwargs, aug_kwargs)
+            # Generate val set as files in a val/ subdirectory
+            if args.val_count > 0 and not args.no_val:
+                val_dir = os.path.join(args.output, "val")
+                print(f"\nGenerating validation set ({args.val_count} samples)...")
+                _generate_to_files(args, val_dir, args.val_count, generator_kwargs, None, label="[val] ")
+    except KeyboardInterrupt:
+        print("\nAborted.")
 
 
 if __name__ == "__main__":

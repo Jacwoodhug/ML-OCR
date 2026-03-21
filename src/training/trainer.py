@@ -304,7 +304,7 @@ class Trainer:
 
             self.scaler = GradScaler("cuda", enabled=self.use_amp)
             self.best_cer = float("inf")
-            print(f"Loaded weights from step {resumed_step} (LR reset, {new_steps} new steps)")
+            print(f"Loaded weights from step {resumed_step} (LR reset, max_lr={lr:.1e}, {new_steps} new steps)")
         else:
             self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
             self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])

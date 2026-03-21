@@ -63,6 +63,8 @@ def main():
     parser.add_argument("--bw", action="store_true", help="Use grayscale, high-contrast generator for validation set")
     parser.add_argument("--tag", default=None, help="Tag appended to checkpoint filenames, e.g. 'grayscale' -> best_grayscale.pt")
     parser.add_argument("--reset-lr", action="store_true", help="Reset LR schedule when resuming (for fine-tuning). --steps becomes the number of NEW training steps")
+    parser.add_argument("--lr", type=float, default=None, help="Override max learning rate (default: 1e-3 for training, recommend 1e-4 for fine-tuning)")
+    parser.add_argument("--val-dir", default=None, help="Pre-generated validation data directory (skips auto-generation)")
     args = parser.parse_args()
 
     # Load config
@@ -71,6 +73,10 @@ def main():
 
     if args.steps is not None:
         config.setdefault("training", {})["max_iterations"] = args.steps
+
+    if args.lr is not None:
+        config.setdefault("training", {}).setdefault("optimizer", {})["lr"] = args.lr
+        config.setdefault("training", {}).setdefault("scheduler", {})["max_lr"] = args.lr
 
     if args.tag:
         tag = args.tag
@@ -85,26 +91,44 @@ def main():
     seed = config.get("project", {}).get("seed", 42)
     torch.manual_seed(seed)
 
-    # Create generator
-    generator = SynthGenerator(
-        fonts_json=data_cfg.get("fonts_cache", "data/fonts/fonts.json"),
-        backgrounds_dir=data_cfg.get("backgrounds_dir", "data/backgrounds"),
-        img_height=data_cfg.get("img_height", 32),
-        img_min_width=data_cfg.get("img_min_width", 32),
-        img_max_width=data_cfg.get("img_max_width", 800),
-        min_text_len=data_cfg.get("min_text_len", 1),
-        max_text_len=data_cfg.get("max_text_len", 50),
-        word_mode_prob=data_cfg.get("word_mode_prob", 0.7),
-        bg_solid_prob=data_cfg.get("bg_solid_prob", 0.3),
-        bg_gradient_prob=data_cfg.get("bg_gradient_prob", 0.3),
-        bg_texture_prob=data_cfg.get("bg_texture_prob", 0.4),
-        bw=args.bw,
-    )
+    # Resolve validation set: explicit --val-dir > auto-detect val/ subdirectory > auto-generate
+    generator = None
+    if args.val_dir:
+        val_dir = args.val_dir
+        print(f"Using validation set from {val_dir}")
+    else:
+        # Auto-detect val/ subdirectory alongside training data
+        auto_val = None
+        if args.lmdb:
+            candidate = os.path.join(args.lmdb, "val")
+            if os.path.isdir(candidate) and os.path.exists(os.path.join(candidate, "labels.txt")):
+                auto_val = candidate
+        elif args.data_dir:
+            candidate = os.path.join(args.data_dir, "val")
+            if os.path.isdir(candidate) and os.path.exists(os.path.join(candidate, "labels.txt")):
+                auto_val = candidate
 
-    # Generate validation set
-    val_dir = "data/val"
-    val_size = train_cfg.get("val_size", 10000)
-    generate_validation_set(generator, val_dir, val_size)
+        if auto_val:
+            val_dir = auto_val
+            print(f"Using validation set from {val_dir}")
+        else:
+            val_dir = "data/val"
+            generator = SynthGenerator(
+                fonts_json=data_cfg.get("fonts_cache", "data/fonts/fonts.json"),
+                backgrounds_dir=data_cfg.get("backgrounds_dir", "data/backgrounds"),
+                img_height=data_cfg.get("img_height", 32),
+                img_min_width=data_cfg.get("img_min_width", 32),
+                img_max_width=data_cfg.get("img_max_width", 800),
+                min_text_len=data_cfg.get("min_text_len", 1),
+                max_text_len=data_cfg.get("max_text_len", 50),
+                word_mode_prob=data_cfg.get("word_mode_prob", 0.7),
+                bg_solid_prob=data_cfg.get("bg_solid_prob", 0.3),
+                bg_gradient_prob=data_cfg.get("bg_gradient_prob", 0.3),
+                bg_texture_prob=data_cfg.get("bg_texture_prob", 0.4),
+                bw=args.bw,
+            )
+            val_size = train_cfg.get("val_size", 10000)
+            generate_validation_set(generator, val_dir, val_size)
 
     # Create datasets
     aug_config = data_cfg.get("augmentation", {})
@@ -121,6 +145,21 @@ def main():
         print(f"Using pre-generated training data from {args.data_dir}")
         train_dataset = PregenOCRDataset(args.data_dir, augment=augment, aug_config=aug_kwargs)
     else:
+        if not generator:
+            generator = SynthGenerator(
+                fonts_json=data_cfg.get("fonts_cache", "data/fonts/fonts.json"),
+                backgrounds_dir=data_cfg.get("backgrounds_dir", "data/backgrounds"),
+                img_height=data_cfg.get("img_height", 32),
+                img_min_width=data_cfg.get("img_min_width", 32),
+                img_max_width=data_cfg.get("img_max_width", 800),
+                min_text_len=data_cfg.get("min_text_len", 1),
+                max_text_len=data_cfg.get("max_text_len", 50),
+                word_mode_prob=data_cfg.get("word_mode_prob", 0.7),
+                bg_solid_prob=data_cfg.get("bg_solid_prob", 0.3),
+                bg_gradient_prob=data_cfg.get("bg_gradient_prob", 0.3),
+                bg_texture_prob=data_cfg.get("bg_texture_prob", 0.4),
+                bw=args.bw,
+            )
         train_dataset = SynthOCRDataset(
             generator=generator,
             epoch_size=train_cfg.get("batch_size", 256) * 1000,

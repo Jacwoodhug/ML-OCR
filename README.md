@@ -105,8 +105,16 @@ Or generate directly to LMDB (skips intermediate files, faster for large dataset
 python scripts/pregenerate.py --lmdb data/train.lmdb --count 500000 --bw --bg-ratio 60
 ```
 
+A validation set (10K samples by default) is automatically generated in a `val/` subdirectory alongside the training data, which `train.py` auto-detects:
+
+```powershell
+python scripts/pregenerate.py --lmdb data/train.lmdb --count 500000 --bw --bg-ratio 60
+```
+
 Options:
-- `--count N` — Number of samples to generate
+- `--count N` — Number of training samples to generate
+- `--val-count N` — Number of validation samples to generate (default: 10000, saved to `val/` subdirectory)
+- `--no-val` — Skip validation set generation
 - `--output DIR` — Output directory (for file-based output)
 - `--lmdb PATH` — Write directly to LMDB format (skips intermediate files)
 - `--config CONFIG` — Config file (default: `config/default.yaml`)
@@ -167,6 +175,8 @@ Options:
 - `--bw` — Use grayscale, high-contrast generator for the validation set
 - `--tag NAME` — Tag appended to checkpoint filenames (e.g. `--tag grayscale` → `best_grayscale.pt`)
 - `--reset-lr` — Reset the learning rate schedule when resuming (for fine-tuning on new data). Loads model weights only, creates a fresh optimizer and LR schedule
+- `--lr FLOAT` — Override max learning rate (default: 1e-3). Use a lower value for fine-tuning (see recommendations below)
+- `--val-dir DIR` — Use a pre-generated validation set instead of auto-generating one. Generate with `pregenerate.py` to control background mix, fonts, etc.
 
 The default config trains for 500K iterations with batch size 256, mixed precision (FP16) on GPU.
 
@@ -220,13 +230,35 @@ python scripts/train.py --data-dir data/finetune_consolas --resume checkpoints/b
 
 The `--reset-lr` flag loads only the model weights from the checkpoint and creates a fresh optimizer + LR schedule for the specified number of new steps. Without it, the scheduler state from the original training run is restored, which typically means a near-zero learning rate — too low for the model to adapt to new data.
 
+**Important:** When fine-tuning, use `--lr` to lower the max learning rate. The default (1e-3) is designed for training from scratch and will destroy the pretrained weights:
+
+```powershell
+# Fine-tune with a lower learning rate
+python scripts/train.py --resume checkpoints/best.pt --steps 50000 --tag consolas --bw --reset-lr --lr 1e-4
+```
+
+**Recommended learning rates:**
+
+| Scenario | `--lr` | Notes |
+|---|---|---|
+| Training from scratch | `1e-3` (default) | Full OneCycle schedule |
+| Fine-tuning (similar data) | `1e-4` | Small domain shift, e.g. adding backgrounds |
+| Fine-tuning (different data) | `2e-4` – `5e-4` | Larger domain shift, e.g. new font families |
+| Light adaptation | `5e-5` | Minor adjustments, low risk of forgetting |
+
 Tips:
 - **Dataset size:** 10K–50K samples is usually enough for fine-tuning on a handful of fonts.
 - **Steps:** 20K–50K fine-tuning steps is a reasonable starting point; monitor CER on TensorBoard.
-- **`--bw` flag on training:** Generates the validation set in the same grayscale style so metrics reflect your target domain.
+- **Matching validation to training data:** Use `--val-count` when generating data so the val set matches the training distribution. `train.py` auto-detects the `val/` subdirectory:
+  ```powershell
+  # Generate training + val data with 60% textured backgrounds
+  python scripts/pregenerate.py --lmdb data/train-bg60.lmdb --count 500000 --bw --bg-ratio 60
+
+  # Fine-tune — val set is auto-detected from the LMDB directory
+  python scripts/train.py --resume checkpoints/best.pt --lmdb data/train-bg60.lmdb --reset-lr --lr 1e-4 --bw --tag bg-finetune
+  ```
 - **Combining with `--augment`:** You can pre-bake augmentations (`--augment` on `pregenerate.py`) and then use `--no-augment` during training for maximum throughput.
 - **Mixing data:** For best results, consider mixing font-specific data with some general data to avoid catastrophic forgetting. Generate both datasets and combine them into one directory.
-- **Background fine-tuning:** To improve robustness on noisy backgrounds, generate data with `--bg-ratio 60` and fine-tune with `--reset-lr`.
 
 The fine-tuned checkpoint will be saved as `checkpoints/best_consolas.pt` (matching the `--tag`).
 
