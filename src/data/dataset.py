@@ -75,21 +75,24 @@ class PregenOCRDataset(Dataset):
     """Pre-generated dataset loaded from disk.
 
     Expects a directory with:
-        - images/ containing .png files named 000000.png, 000001.png, ...
+        - images/ containing .jpg or .png files named 000000.jpg, 000001.jpg, ...
         - labels.txt with one ground-truth text per line
 
     When augment=True, augmentations are applied at load time (for training).
     """
 
     def __init__(self, data_dir: str, augment: bool = False, aug_config: dict | None = None):
-        from PIL import Image
-
         self.data_dir = data_dir
         labels_path = os.path.join(data_dir, "labels.txt")
         with open(labels_path, "r", encoding="utf-8") as f:
             self.labels = [line.rstrip("\n") for line in f]
 
         self.image_dir = os.path.join(data_dir, "images")
+
+        # Detect extension once at init rather than per __getitem__
+        first_jpg = os.path.join(self.image_dir, "000000.jpg")
+        self._ext = ".jpg" if os.path.exists(first_jpg) else ".png"
+
         self.augment = augment
         if augment:
             cfg = aug_config or {}
@@ -103,10 +106,91 @@ class PregenOCRDataset(Dataset):
     def __getitem__(self, idx: int) -> dict:
         from PIL import Image
 
-        base = os.path.join(self.image_dir, f"{idx:06d}")
-        img_path = base + ".jpg" if os.path.exists(base + ".jpg") else base + ".png"
+        img_path = os.path.join(self.image_dir, f"{idx:06d}{self._ext}")
         img = Image.open(img_path).convert("RGB")
         img_np = np.array(img, dtype=np.uint8)
+
+        if self.augment and self.aug_pipeline is not None:
+            img_np = apply_augmentation(img_np, self.aug_pipeline)
+
+        img_tensor = torch.from_numpy(img_np).permute(2, 0, 1).float() / 255.0
+
+        text = self.labels[idx]
+        target = encode(text)
+
+        return {
+            "image": img_tensor,
+            "target": torch.tensor(target, dtype=torch.long),
+            "target_length": len(target),
+            "text": text,
+        }
+
+
+class LMDBOCRDataset(Dataset):
+    """Pre-generated dataset stored in LMDB for fast random-access loading.
+
+    Expects an LMDB created by scripts/convert_to_lmdb.py with keys:
+        image-{idx:08d}  ->  JPEG bytes
+        label-{idx:08d}  ->  UTF-8 label
+        num_samples      ->  ASCII decimal count
+
+    Each DataLoader worker opens its own LMDB handle lazily on first access
+    (LMDB handles cannot be shared across processes).
+    """
+
+    def __init__(self, lmdb_path: str, augment: bool = False, aug_config: dict | None = None):
+        import lmdb
+
+        self.lmdb_path = lmdb_path
+        self.augment = augment
+
+        # Read sample count and labels from a short-lived handle at init time
+        env = lmdb.open(lmdb_path, readonly=True, lock=False, readahead=False, meminit=False)
+        with env.begin() as txn:
+            self._length = int(txn.get(b"num_samples").decode())
+            self.labels = [
+                txn.get(f"label-{i:08d}".encode()).decode("utf-8")
+                for i in range(self._length)
+            ]
+        env.close()
+
+        # Per-worker handle — opened lazily in __getitem__
+        self._env = None
+
+        if augment:
+            cfg = aug_config or {}
+            self.aug_pipeline = get_augmentation_pipeline(**cfg)
+        else:
+            self.aug_pipeline = None
+
+    def _get_env(self):
+        import lmdb
+
+        if self._env is None:
+            import cv2
+            cv2.setNumThreads(0)
+            self._env = lmdb.open(
+                self.lmdb_path,
+                readonly=True,
+                lock=False,
+                readahead=False,
+                meminit=False,
+            )
+        return self._env
+
+    def __len__(self) -> int:
+        return self._length
+
+    def __getitem__(self, idx: int) -> dict:
+        import cv2
+
+        env = self._get_env()
+        with env.begin() as txn:
+            jpeg_bytes = txn.get(f"image-{idx:08d}".encode())
+
+        buf = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+        img_np = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        img_np = cv2.cvtColor(img_np, cv2.COLOR_BGR2RGB)
 
         if self.augment and self.aug_pipeline is not None:
             img_np = apply_augmentation(img_np, self.aug_pipeline)
@@ -135,18 +219,13 @@ def collate_fn(batch: list[dict]) -> dict:
     target_lengths = [item["target_length"] for item in batch]
     texts = [item["text"] for item in batch]
 
-    # Pad images to max width in this batch
+    # Pad images to max width in this batch via pre-allocated tensor (avoids
+    # 512 individual torch.zeros + torch.cat calls per batch)
     max_w = max(img.shape[2] for img in images)
-    padded = []
-    for img in images:
-        # img shape: (C, H, W)
-        pad_w = max_w - img.shape[2]
-        if pad_w > 0:
-            padding = torch.zeros(img.shape[0], img.shape[1], pad_w, dtype=img.dtype)
-            img = torch.cat([img, padding], dim=2)
-        padded.append(img)
-
-    image_batch = torch.stack(padded, dim=0)  # (B, C, H, W)
+    C, H = images[0].shape[0], images[0].shape[1]
+    image_batch = torch.zeros(len(images), C, H, max_w, dtype=images[0].dtype)
+    for i, img in enumerate(images):
+        image_batch[i, :, :, :img.shape[2]] = img
 
     # Concatenate all targets into a single 1D tensor (CTC format)
     target_concat = torch.cat(targets, dim=0)  # (sum of target_lengths,)

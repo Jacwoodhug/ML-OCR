@@ -1,7 +1,6 @@
 """Training loop with mixed precision, CTC loss, LR scheduling, and logging."""
 
 import os
-import time
 
 import torch
 import torch.nn as nn
@@ -157,6 +156,11 @@ class Trainer:
         finally:
             pbar.close()
             self.writer.close()
+            # Shut down persistent DataLoader workers so the process can exit
+            if hasattr(self.train_loader, '_iterator') and self.train_loader._iterator is not None:
+                self.train_loader._iterator._shutdown_workers()
+            if self.val_loader and hasattr(self.val_loader, '_iterator') and self.val_loader._iterator is not None:
+                self.val_loader._iterator._shutdown_workers()
 
         if self.global_step >= self.max_iterations:
             print(f"Training complete. Best CER: {self.best_cer:.4f}")

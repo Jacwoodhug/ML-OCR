@@ -8,8 +8,6 @@ def get_augmentation_pipeline(
     blur_limit: int = 5,
     noise_var_limit: float = 25.0,
     jpeg_quality_lower: int = 50,
-    rotation_limit: int = 5,
-    perspective_scale: float = 0.05,
     brightness_limit: float = 0.3,
     contrast_limit: float = 0.3,
 ) -> A.Compose:
@@ -31,27 +29,19 @@ def get_augmentation_pipeline(
         # JPEG compression
         A.ImageCompression(quality_range=(jpeg_quality_lower, 100), p=0.2),
 
-        # Geometric
+        # Geometric – no rotation/perspective/translation since images are
+        # tightly cropped and text would be pushed out of frame.
         A.Affine(
-            translate_percent={"x": (-0.02, 0.02), "y": (-0.02, 0.02)},
             scale=(0.95, 1.05),
-            rotate=(-rotation_limit, rotation_limit),
             mode=0,  # constant border
-            p=0.3,
+            p=0.2,
         ),
-        A.Perspective(scale=perspective_scale, p=0.2),
 
-        # Color / brightness
+        # Brightness / contrast (no hue/sat – training is grayscale)
         A.RandomBrightnessContrast(
             brightness_limit=brightness_limit,
             contrast_limit=contrast_limit,
             p=0.3,
-        ),
-        A.HueSaturationValue(
-            hue_shift_limit=10,
-            sat_shift_limit=20,
-            val_shift_limit=20,
-            p=0.2,
         ),
 
         # Shadow simulation (random rectangular darkening)

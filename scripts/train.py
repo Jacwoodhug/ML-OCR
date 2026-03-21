@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.data.alphabet import NUM_CLASSES
-from src.data.dataset import PregenOCRDataset, SynthOCRDataset, collate_fn
+from src.data.dataset import LMDBOCRDataset, PregenOCRDataset, SynthOCRDataset, collate_fn
 from src.data.synth_generator import SynthGenerator
 from src.model.crnn import CRNN
 from src.training.trainer import Trainer
@@ -58,7 +58,9 @@ def main():
     parser.add_argument("--resume", default=None, help="Checkpoint path to resume from")
     parser.add_argument("--steps", type=int, default=None, help="Override max training iterations")
     parser.add_argument("--data-dir", default=None, help="Pre-generated training data directory (skips on-the-fly generation)")
+    parser.add_argument("--lmdb", default=None, help="LMDB training dataset path (faster than --data-dir for large datasets)")
     parser.add_argument("--no-augment", action="store_true", help="Disable runtime augmentation (use when data was pre-augmented)")
+    parser.add_argument("--simple", action="store_true", help="Use simple (grayscale, high-contrast) generator for validation set")
     parser.add_argument("--tag", default=None, help="Tag appended to checkpoint filenames, e.g. 'grayscale' -> best_grayscale.pt")
     args = parser.parse_args()
 
@@ -95,6 +97,7 @@ def main():
         bg_solid_prob=data_cfg.get("bg_solid_prob", 0.3),
         bg_gradient_prob=data_cfg.get("bg_gradient_prob", 0.3),
         bg_texture_prob=data_cfg.get("bg_texture_prob", 0.4),
+        simple=args.simple,
     )
 
     # Generate validation set
@@ -110,7 +113,10 @@ def main():
     if args.no_augment:
         print("Runtime augmentation: disabled")
 
-    if args.data_dir:
+    if args.lmdb:
+        print(f"Using LMDB training data from {args.lmdb}")
+        train_dataset = LMDBOCRDataset(args.lmdb, augment=augment, aug_config=aug_kwargs)
+    elif args.data_dir:
         print(f"Using pre-generated training data from {args.data_dir}")
         train_dataset = PregenOCRDataset(args.data_dir, augment=augment, aug_config=aug_kwargs)
     else:

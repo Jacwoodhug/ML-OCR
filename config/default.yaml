@@ -29,8 +29,6 @@ data:
     blur_limit: 5
     noise_var_limit: 25.0
     jpeg_quality_lower: 50
-    rotation_limit: 5
-    perspective_scale: 0.05
     brightness_limit: 0.3
     contrast_limit: 0.3
 
@@ -46,9 +44,9 @@ model:
 
 # Training
 training:
-  batch_size: 512
-  num_workers: 8
-  prefetch_factor: 8
+  batch_size: 256
+  num_workers: 4
+  prefetch_factor: 4
   max_iterations: 500000
   val_interval: 2000                   # validate every N iterations
   checkpoint_interval: 10000           # save checkpoint every N iterations
