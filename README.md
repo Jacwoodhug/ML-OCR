@@ -2,6 +2,17 @@
 
 A from-scratch OCR system trained entirely on synthetic data. Uses a CRNN architecture (MobileNetV3-Small + BiLSTM + CTC) for fast, single-line text recognition on both CPU and GPU.
 
+## Benchmark (n=100, CPU)
+
+| Metric | This Model | EasyOCR | Tesseract |
+|---|---|---|---|
+| Exact match (%) | **87.0%** | 40.0% | 33.0% |
+| Char accuracy (%) | **98.4%** | 81.8% | 70.1% |
+| Avg per image (ms) | **5.9** | 134.9 | 125.4 |
+| Speed vs Custom | **1.0x** | 22.7x | 21.1x |
+
+> **Caveat:** This benchmark was tested with black and white synthetic data created using the same method as the training data, with 80% photo backgrounds and 20% color backgrounds. Results on real-world images may differ.
+
 ## Setup
 
 ### 1. Create virtual environment (Python 3.11+)
@@ -13,7 +24,7 @@ python -m venv .venv
 
 ### 2. Install dependencies
 
-PyTorch with CUDA 12.1 (for 3090):
+PyTorch with CUDA 12.1:
 
 ```powershell
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
