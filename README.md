@@ -1,6 +1,8 @@
 # ML-OCR
 
-A from-scratch OCR system trained entirely on synthetic data. Uses a CRNN architecture (MobileNetV3-Small + BiLSTM + CTC) for fast, single-line text recognition on both CPU and GPU.
+A from-scratch OCR system trained entirely on synthetic data using rendered fonts (not handwriting). Recognises single-line English text only. Uses a CRNN architecture (MobileNetV3-Small + BiLSTM + CTC) for fast inference on both CPU and GPU.
+
+**Supported characters:** `a-z A-Z 0-9 . , ! ? - : ; ' " ( ) @ # $ % & + = / _ ~ [ ] { } \ | < > ^ ``
 
 ## Benchmark (n=100, CPU)
 
@@ -13,7 +15,15 @@ A from-scratch OCR system trained entirely on synthetic data. Uses a CRNN archit
 
 > **Caveat:** This benchmark was tested with black and white synthetic data created using the same method as the training data, with 80% photo backgrounds and 20% color backgrounds. Results on real-world images may differ.
 
-## Setup
+## Using the Model
+
+To use the pre-trained model, **download the latest release** from the [Releases page](../../releases/latest). The release includes the ONNX model, a lightweight CLI script, and its own README with instructions for running inference.
+
+Everything below this section is only needed if you want to train the model yourself.
+
+---
+
+## Training Setup
 
 ### 1. Create virtual environment (Python 3.11+)
 
